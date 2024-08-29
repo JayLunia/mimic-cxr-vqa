@@ -46,10 +46,10 @@ def evaluate(args, model=None):
     print("\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(args)).items())))
     assert os.path.isdir(args.output_dir)
     cudnn.benchmark = True
-    
+
     validset = EHRMultiheadallClassification(args=args, phase="valid", data_aug=None, debug=args.debug)
     testset = EHRMultiheadallClassification(args=args, phase="test", data_aug=None, debug=args.debug)
-    
+
     valid_loader = torch.utils.data.DataLoader(
         validset,
         batch_size=args.batch_size_per_gpu,
@@ -62,7 +62,7 @@ def evaluate(args, model=None):
         num_workers=args.num_workers,
         pin_memory=True,
     )
-    
+
     model = DINOMIMICClassification(args, testset.attr_pool)
     model = model.cuda()
     model = nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
@@ -83,7 +83,7 @@ def evaluate(args, model=None):
             + "\n"
         )
 
-    save_log_name = f"test_log" 
+    save_log_name = f"test_log"
     test_stats = test_network(test_loader, model, args.n_last_blocks, output_dir=args.output_dir, full_finetune=args.full_finetune, save_log_name=save_log_name)
     with (Path(args.output_dir) / f"{save_log_name}.txt").open("a") as f:
         f.write(f"Load {len(testset.data_df)} samples for test set" + "\n")
@@ -131,11 +131,11 @@ def finetune_linear_projection(args):
     else:
         data_aug = None
 
-    ### Set wandb logging 
+    ### Set wandb logging
     if args.wandb and utils.is_main_process():
         if args.wandb_id is None:
             args.wandb_id = wandb.util.generate_id()
-            
+
         wandb.init(
             config=args,
             entity=args.wandb_entity_name,
@@ -228,7 +228,7 @@ def finetune_linear_projection(args):
             best_acc = max(best_acc, test_stats["acc1"])
             print(f"Max accuracy so far: {best_acc:.2f}%")
             log_stats = {**{k: v for k, v in log_stats.items()}, **{f"valid_{k}": v for k, v in test_stats.items()}}
-            
+
             if args.wandb and utils.is_main_process():
                 wandb.log(log_stats)
 
@@ -266,7 +266,7 @@ def train(model, optimizer, loader, epoch, n, avgpool, full_finetune=False):
     header = "Epoch: [{}]".format(epoch)
     for data in metric_logger.log_every(loader, 20, header):
         # move to gpu
-        data = {k:v.cuda(non_blocking=True) if k not in ["object", "attribute"] else v for k,v in data.items()}
+        data = {k: v.cuda(non_blocking=True) if k not in ["object", "attribute"] else v for k, v in data.items()}
         data["attribute"] = np.array(data["attribute"])
         data["object"] = np.array(data["object"])
 
@@ -304,7 +304,7 @@ def validate_network(val_loader, model, n, avgpool, full_finetune):
     header = "Test:"
     for data in metric_logger.log_every(val_loader, 20, header):
         # move to gpu)
-        data = {k:v.cuda(non_blocking=True) if k not in ["object", "attribute"] else v for k,v in data.items()}
+        data = {k: v.cuda(non_blocking=True) if k not in ["object", "attribute"] else v for k, v in data.items()}
         data["attribute"] = np.array(data["attribute"])
         data["object"] = np.array(data["object"])
 
@@ -327,7 +327,7 @@ def validate_network(val_loader, model, n, avgpool, full_finetune):
 
     total_preds = total_preds.cpu().numpy()
     total_labels = total_labels.cpu().numpy()
-    f1 = f1_score(total_labels, total_preds >= 0.5, average='micro')
+    f1 = f1_score(total_labels, total_preds >= 0.5, average="micro")
     metric_logger.meters["micro_f1"].update(f1, n=total_labels.shape[0])
     metric_logger.synchronize_between_processes()
     print("* Acc@1 {top1.global_avg:.3f} | f1 {f1:.3f} | loss {losses.global_avg:.3f}".format(top1=metric_logger.acc1, f1=f1, losses=metric_logger.loss))
@@ -341,7 +341,7 @@ def test_network(val_loader, model, n, output_dir, full_finetune=False, split="t
     if full_finetune:
         model.module.model.eval()
     metric_logger = utils.MetricLogger(delimiter="  ")
-    
+
     total_preds = torch.FloatTensor([]).cuda(non_blocking=True)
     total_labels = torch.LongTensor([]).cuda(non_blocking=True)
     total_objects = []
@@ -350,7 +350,7 @@ def test_network(val_loader, model, n, output_dir, full_finetune=False, split="t
     header = "Test:"
     for data in metric_logger.log_every(val_loader, 20, header):
         # move to gpu
-        data = {k:v.cuda(non_blocking=True) if k not in ["object", "attribute"] else v for k,v in data.items()}
+        data = {k: v.cuda(non_blocking=True) if k not in ["object", "attribute"] else v for k, v in data.items()}
         data["attribute"] = np.array(data["attribute"])
         data["object"] = np.array(data["object"])
 
@@ -367,34 +367,35 @@ def test_network(val_loader, model, n, output_dir, full_finetune=False, split="t
     total_labels = total_labels.cpu()
     total_objects = np.array(total_objects)
     total_attributes = np.array(total_attributes)
- 
+
     output = {}
     task = "binary"
-    total_probs = F.softmax(total_preds, dim=1)[:, 1] # probability of positive class (1)
+    total_probs = F.softmax(total_preds, dim=1)[:, 1]  # probability of positive class (1)
 
     output = {
         **output,
         **{
             "micro_acc": accuracy_score(total_labels, total_probs >= 0.5),
-            "micro_f1": f1_score(total_labels, total_probs >= 0.5, average='micro'),
+            "micro_f1": f1_score(total_labels, total_probs >= 0.5, average="micro"),
             "micro_auc": roc_auc_score(total_labels, total_probs),
-        }
+        },
     }
-    
+
     # output - per attribute - micro
     from collections import Counter
+
     output_attr = {}
     for attr in val_loader.dataset.data_df["attribute"].unique():
         total_probs_attr = total_probs[total_attributes == attr]
         total_labels_attr = total_labels[total_attributes == attr]
-        if len(total_labels_attr.unique()) == 2: # if there are both positive and negative samples
+        if len(total_labels_attr.unique()) == 2:  # if there are both positive and negative samples
             output_attr[attr] = {
                 "acc": accuracy_score(total_labels_attr, total_probs_attr >= 0.5),
-                "f1": f1_score(total_labels_attr, total_probs_attr >= 0.5, average='micro'),
+                "f1": f1_score(total_labels_attr, total_probs_attr >= 0.5, average="micro"),
                 "auc": roc_auc_score(total_labels_attr, total_probs_attr),
             }
             output_attr[attr]["support"] = [v for (k, v) in sorted(dict(Counter(total_labels_attr.numpy())).items(), key=lambda item: item[0])]
-            
+
     # output - per attribute - macro
     output = {
         **output,
@@ -402,24 +403,24 @@ def test_network(val_loader, model, n, output_dir, full_finetune=False, split="t
             "macro_acc_attr": np.mean([v["acc"] for v in output_attr.values()]),
             "macro_f1_attr": np.mean([v["f1"] for v in output_attr.values()]),
             "macro_auc_attr": np.mean([v["auc"] for v in output_attr.values()]),
-        }
+        },
     }
-            
+
     # output - per object_attribute - micro
     output_objattr = {}
-    for (obj, attr) in val_loader.dataset.data_df[["object", "attribute"]].drop_duplicates().values:
+    for obj, attr in val_loader.dataset.data_df[["object", "attribute"]].drop_duplicates().values:
         total_probs_objattr = total_probs[(total_objects == obj) & (total_attributes == attr)]
         total_labels_objattr = total_labels[(total_objects == obj) & (total_attributes == attr)]
-        if len(total_labels_objattr.unique()) == 2: # if there are both positive and negative samples
+        if len(total_labels_objattr.unique()) == 2:  # if there are both positive and negative samples
             objattr = f"{obj}_{attr}"
             output_objattr[objattr] = {
                 "acc": accuracy_score(total_labels_objattr, total_probs_objattr >= 0.5),
-                "f1": f1_score(total_labels_objattr, total_probs_objattr >= 0.5, average='micro'),
+                "f1": f1_score(total_labels_objattr, total_probs_objattr >= 0.5, average="micro"),
                 "auc": roc_auc_score(total_labels_objattr, total_probs_objattr),
             }
             output_objattr[objattr]["support"] = [v for (k, v) in sorted(dict(Counter(total_labels_objattr.numpy())).items(), key=lambda item: item[0])]
-    
-    # output - per object_attribute - macro        
+
+    # output - per object_attribute - macro
     output = {
         **output,
         **{
@@ -428,21 +429,21 @@ def test_network(val_loader, model, n, output_dir, full_finetune=False, split="t
             "macro_auc_objattr": np.mean([v["auc"] for v in output_objattr.values()]),
         },
     }
-    
+
     # save output
     save_pt_name = f"{save_log_name}.pt"
     torch.save(
         {
-            "labels": total_labels, 
+            "labels": total_labels,
             "logits": total_preds,
             "objects": total_objects,
             "attributes": total_attributes,
         },
-        os.path.join(output_dir, save_pt_name)
+        os.path.join(output_dir, save_pt_name),
     )
-    
+
     # save logging
-    save_log_name = f"{save_log_name}.txt" 
+    save_log_name = f"{save_log_name}.txt"
     with (Path(output_dir) / save_log_name).open("a") as f:
         f.write("-" * 100 + "\n")
         f.write(f"{len(output_attr)} attribute pairs" + "\n")
@@ -454,11 +455,19 @@ def test_network(val_loader, model, n, output_dir, full_finetune=False, split="t
             if task == "binary":
                 f.write(f"{attr:80s} | auc & f1 & acc score: {auc:.3f} / {f1:.3f} / {acc:.3f} | supp: {support}" + "\n")
             else:
-                f.write(f"{attr:80s} | AUC & f1 & acc score: " + " ".join(f"{x:.3f}" for x in auc) + " / " +  " ".join(f"{x:.3f}" for x in f1) + " / " +  " ".join(f"{x:.3f}" for x in acc) + f" | supp: {support}\n")
+                f.write(
+                    f"{attr:80s} | AUC & f1 & acc score: "
+                    + " ".join(f"{x:.3f}" for x in auc)
+                    + " / "
+                    + " ".join(f"{x:.3f}" for x in f1)
+                    + " / "
+                    + " ".join(f"{x:.3f}" for x in acc)
+                    + f" | supp: {support}\n"
+                )
 
         f.write("-" * 100 + "\n")
         f.write(f"{len(output_objattr)} object-attribute pairs" + "\n")
-        for (obj, attr) in val_loader.dataset.data_df[["object", "attribute"]].drop_duplicates().sort_values(by=["object", "attribute"]).values:
+        for obj, attr in val_loader.dataset.data_df[["object", "attribute"]].drop_duplicates().sort_values(by=["object", "attribute"]).values:
             objattr = f"{obj}_{attr}"
             auc = output_objattr[objattr]["auc"] if objattr in output_objattr else (-1 if task == "binary" else [-1])
             f1 = output_objattr[objattr]["f1"] if objattr in output_objattr else (-1 if task == "binary" else [-1])
@@ -467,7 +476,15 @@ def test_network(val_loader, model, n, output_dir, full_finetune=False, split="t
             if task == "binary":
                 f.write(f"{objattr:80s} | auc & f1 & acc score: {auc:.3f} / {f1:.3f} / {acc:.3f} | supp: {support}" + "\n")
             else:
-                f.write(f"{objattr:80s} | AUC & f1 & acc score: " + " ".join(f"{x:.3f}" for x in auc) + " / " +  " ".join(f"{x:.3f}" for x in f1) + " / " +  " ".join(f"{x:.3f}" for x in acc) + f" | supp: {support}\n")
+                f.write(
+                    f"{objattr:80s} | AUC & f1 & acc score: "
+                    + " ".join(f"{x:.3f}" for x in auc)
+                    + " / "
+                    + " ".join(f"{x:.3f}" for x in f1)
+                    + " / "
+                    + " ".join(f"{x:.3f}" for x in acc)
+                    + f" | supp: {support}\n"
+                )
 
         f.write("-" * 100 + "\n")
         if task == "binary":
@@ -475,10 +492,34 @@ def test_network(val_loader, model, n, output_dir, full_finetune=False, split="t
             f.write(f"""macro AUC & f1 & acc (attr)    : {output["macro_auc_attr"]:.3f} / {output["macro_f1_attr"]:.3f} / {output["macro_acc_attr"] * 100:.3f}""" + "\n")
             f.write(f"""macro AUC & f1 & acc (obj-attr): {output['macro_auc_objattr']:.3f} / {output["macro_f1_objattr"].item():.3f} / {output["macro_acc_objattr"] * 100:.3f}""" + "\n")
         else:
-            f.write(f"micro AUC & f1 & acc           :" + " ".join(f"{x:.3f}" for x in output["micro_auc"]) + " / " +  " ".join(f"{x:.3f}" for x in output["micro_f1"]) + " / " +  " ".join(f"{x*100:.3f}" for x in output["macro_acc_attr"]) + "\n")
-            f.write(f"micro AUC & f1 & acc (attr)    :" + " ".join(f"{x:.3f}" for x in output["macro_auc_attr"]) + " / " +  " ".join(f"{x:.3f}" for x in output["macro_f1_attr"]) + " / " +  " ".join(f"{x*100:.3f}" for x in output["micro_acc"]) + "\n")
-            f.write(f"micro AUC & f1 & acc (obj-attr):" + " ".join(f"{x:.3f}" for x in output["macro_auc_objattr"]) + " / " +  " ".join(f"{x:.3f}" for x in output["macro_f1_objattr"]) + " / " +  " ".join(f"{x*100:.3f}" for x in output["macro_acc_objattr"])+ "\n")
-        
+            f.write(
+                f"micro AUC & f1 & acc           :"
+                + " ".join(f"{x:.3f}" for x in output["micro_auc"])
+                + " / "
+                + " ".join(f"{x:.3f}" for x in output["micro_f1"])
+                + " / "
+                + " ".join(f"{x*100:.3f}" for x in output["macro_acc_attr"])
+                + "\n"
+            )
+            f.write(
+                f"micro AUC & f1 & acc (attr)    :"
+                + " ".join(f"{x:.3f}" for x in output["macro_auc_attr"])
+                + " / "
+                + " ".join(f"{x:.3f}" for x in output["macro_f1_attr"])
+                + " / "
+                + " ".join(f"{x*100:.3f}" for x in output["micro_acc"])
+                + "\n"
+            )
+            f.write(
+                f"micro AUC & f1 & acc (obj-attr):"
+                + " ".join(f"{x:.3f}" for x in output["macro_auc_objattr"])
+                + " / "
+                + " ".join(f"{x:.3f}" for x in output["macro_f1_objattr"])
+                + " / "
+                + " ".join(f"{x*100:.3f}" for x in output["macro_acc_objattr"])
+                + "\n"
+            )
+
     return output
 
 
@@ -528,11 +569,11 @@ if __name__ == "__main__":
     parser.add_argument("--evaluate", dest="evaluate", action="store_true", help="evaluate model on validation set")
 
     #### For MIMIC ####
-    parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--img_size', default=224, type=int)
+    parser.add_argument("--seed", default=42, type=int)
+    parser.add_argument("--img_size", default=224, type=int)
     parser.add_argument("--imgroot", default="../../../physionet.org/files/mimic-cxr-jpg/re512_3ch_contour_cropped", type=str)
     parser.add_argument("--dataroot", default="../../dataset", type=str)
-    
+
     parser.add_argument("--cropping_type", dest="cropping_type", type=str, default=None, choices=["img_crop", "feat_crop", "full_img"])
     parser.add_argument("--feature_type", dest="feature_type", type=str, default="only_global", choices=["only_global", "only_local", "both_local_global"])
     parser.add_argument("--from_scratch", dest="from_scratch", action="store_true", help="from the scratch model")
