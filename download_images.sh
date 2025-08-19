@@ -20,8 +20,10 @@ WGET_PARAMS="-r -N -c -np --user $USERNAME --password $PASSWORD"
 # Function to download files
 download() {
     local file_url=$1
-    wget $WGET_PARAMS "$file_url" || { echo "Error: Failed to download $file_url" >&2; exit 1; }
+    clean_url=$(echo "$file_url" | tr -d '\r')
+    wget $WGET_PARAMS "$clean_url" || { echo "Error: Failed to download $clean_url" >&2; exit 1; }
 }
+
 
 # Function to extract image paths from JSON files
 get_image_paths() {
@@ -30,12 +32,15 @@ get_image_paths() {
 }
 
 # Gather image paths from JSON dataset files
-image_paths_train=$(get_image_paths 'mimiccxrvqa/dataset/train.json')
-image_paths_valid=$(get_image_paths 'mimiccxrvqa/dataset/valid.json')
-image_paths_test=$(get_image_paths 'mimiccxrvqa/dataset/test.json')
+image_paths_train=$(get_image_paths 'mimiccxrvqa/dataset/processed_train.json')
+image_paths_valid=$(get_image_paths 'mimiccxrvqa/dataset/processed_valid.json')
+image_paths_test=$(get_image_paths 'mimiccxrvqa/dataset/processed_test.json')
 
 # Combine paths from train, valid, and test
-image_paths=$(echo -e "$image_paths_train\n$image_paths_valid\n$image_paths_test")
+# image_paths=$(echo -e "$image_paths_train\n$image_paths_valid\n$image_paths_test")
+image_paths=$(echo -e "$image_paths_train\n$image_paths_valid\n$image_paths_test" | tr -d '\r')
+
+
 
 # Remove duplicates and convert to an array
 readarray -t arr <<<"$(echo "$image_paths" | sort -u)"
